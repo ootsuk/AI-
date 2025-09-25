@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, type GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { ALL_MOVES, getMoveByName } from "../constants/moves";
 import type { Gijimon, Stats, Move } from "../types";
 import { GijimonType } from "../types";
@@ -6,7 +6,8 @@ import { GijimonType } from "../types";
 const API_KEY = process.env.API_KEY;
 
 if (!API_KEY) {
-  throw new Error("API_KEY is not set in environment variables.");
+  // This error will be caught by the UI and displayed in a user-friendly way.
+  throw new Error("API_KEY is not set.");
 }
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
@@ -35,7 +36,7 @@ const generateTextPrompt = (typeMoves: { [key in GijimonType]: string[] }) => `
 以下のJSONスキーマに従って、キーも指定通り英語で出力してください。他のテキストは含めないでください。
 `;
 
-const generateGijimonProperties = async (base64Image: string, mimeType: string): Promise<any> => {
+export const generateGijimonProperties = async (base64Image: string, mimeType: string): Promise<any> => {
   const typeMoves = ALL_MOVES.reduce((acc, move) => {
     if (!acc[move.type]) {
       acc[move.type] = [];
@@ -46,68 +47,77 @@ const generateGijimonProperties = async (base64Image: string, mimeType: string):
     return acc;
   }, {} as { [key in GijimonType]: string[] });
   
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: {
-      parts: [
-        { inlineData: { data: base64Image.split(',')[1], mimeType } },
-        { text: generateTextPrompt(typeMoves) }
-      ]
-    },
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          name: { type: Type.STRING, description: "モンスターのユニークでかっこいい名前" },
-          type: { type: Type.STRING, enum: GijimonTypesArray, description: "モンスターのタイプ" },
-          stats: {
-            type: Type.OBJECT,
-            properties: {
-              hp: { type: Type.INTEGER, description: "HP (30-100)" },
-              attack: { type: Type.INTEGER, description: "こうげき (30-100)" },
-              defense: { type: Type.INTEGER, description: "ぼうぎょ (30-100)" },
-              specialAttack: { type: Type.INTEGER, description: "とくこう (30-100)" },
-              specialDefense: { type: Type.INTEGER, description: "とくぼう (30-100)" },
-              speed: { type: Type.INTEGER, description: "すばやさ (30-100)" },
-            },
-            required: ["hp", "attack", "defense", "specialAttack", "specialDefense", "speed"]
-          },
-          moves: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "覚える技のリスト"
-          },
-          description: { type: Type.STRING, description: "モンスターの見た目や特徴の説明文" }
-        },
-        required: ["name", "type", "stats", "moves", "description"]
-      }
-    }
-  });
-
   try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: {
+        parts: [
+          { inlineData: { data: base64Image.split(',')[1], mimeType } },
+          { text: generateTextPrompt(typeMoves) }
+        ]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING, description: "モンスターのユニークでかっこいい名前" },
+            type: { type: Type.STRING, enum: GijimonTypesArray, description: "モンスターのタイプ" },
+            stats: {
+              type: Type.OBJECT,
+              properties: {
+                hp: { type: Type.INTEGER, description: "HP (30-100)" },
+                attack: { type: Type.INTEGER, description: "こうげき (30-100)" },
+                defense: { type: Type.INTEGER, description: "ぼうぎょ (30-100)" },
+                specialAttack: { type: Type.INTEGER, description: "とくこう (30-100)" },
+                specialDefense: { type: Type.INTEGER, description: "とくぼう (30-100)" },
+                speed: { type: Type.INTEGER, description: "すばやさ (30-100)" },
+              },
+              required: ["hp", "attack", "defense", "specialAttack", "specialDefense", "speed"]
+            },
+            moves: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "覚える技のリスト"
+            },
+            description: { type: Type.STRING, description: "モンスターの見た目や特徴の説明文" }
+          },
+          required: ["name", "type", "stats", "moves", "description"]
+        }
+      }
+    });
     return JSON.parse(response.text);
-  } catch (e) {
-    console.error("Failed to parse JSON from Gemini:", response.text);
-    throw new Error("AIからの応答が不正な形式です。");
+  } catch (e: any) {
+     if (e.message.includes('quota')) {
+        throw new Error('API quota exceeded');
+     }
+     console.error("Failed to generate Gijimon properties:", e);
+     throw new Error("Gijimon properties generation failed.");
   }
 };
 
-const generateGijimonImage = async (description: string, type: string): Promise<string> => {
+export const generateGijimonImage = async (description: string, type: string): Promise<string> => {
     const prompt = `A Pokémon-style creature, ${description}. It is a ${type} type. Full body, vibrant colors, clean lines, white background, digital art.`;
-    const response = await ai.models.generateImages({
-        model: 'imagen-4.0-generate-001',
-        prompt: prompt,
-        config: {
-          numberOfImages: 1,
-          outputMimeType: 'image/png',
-          aspectRatio: '1:1',
-        },
-    });
-    const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
-    return `data:image/png;base64,${base64ImageBytes}`;
+    try {
+        const response = await ai.models.generateImages({
+            model: 'imagen-4.0-generate-001',
+            prompt: prompt,
+            config: {
+              numberOfImages: 1,
+              outputMimeType: 'image/png',
+              aspectRatio: '1:1',
+            },
+        });
+        const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
+        return `data:image/png;base64,${base64ImageBytes}`;
+    } catch (e: any) {
+        if (e.message.includes('quota')) {
+            throw new Error('API quota exceeded');
+        }
+        console.error("Failed to generate Gijimon image:", e);
+        throw new Error("Gijimon image generation failed.");
+    }
 };
-
 
 export const evolveGijimonImage = async (gijimon: Gijimon): Promise<{ newImage: string, newName: string }> => {
   const evolutionPrompt = `An evolved, more powerful, final-evolution version of a Pokémon-style creature, ${gijimon.description}. It is a ${gijimon.type} type. Make it look majestic and stronger. Full body, dynamic pose, vibrant colors, clean lines, white background, digital art.`;
@@ -132,25 +142,20 @@ export const evolveGijimonImage = async (gijimon: Gijimon): Promise<{ newImage: 
   return { newImage, newName };
 }
 
-export const createGijimonFromImage = async (file: File): Promise<Omit<Gijimon, 'id' | 'level' | 'exp' | 'expToNextLevel' | 'currentHp'>> => {
-  const mimeType = file.type;
-  const reader = new FileReader();
-  const base64Promise = new Promise<string>((resolve, reject) => {
+export const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = error => reject(error);
-    reader.readAsDataURL(file);
   });
-  const baseImage = await base64Promise;
+};
 
-  const properties = await generateGijimonProperties(baseImage, mimeType);
-  
-  const gijimonImage = await generateGijimonImage(properties.description, properties.type);
-
+export const assembleGijimon = (properties: any, baseImage: string, gijimonImage: string): Omit<Gijimon, 'id' | 'level' | 'exp' | 'expToNextLevel' | 'currentHp'> => {
   const moves = properties.moves
     .map((name: string) => getMoveByName(name))
     .filter((move): move is Move => move !== undefined);
 
-  // ステータスのキーを変換
   const stats: Stats = {
     hp: properties.stats.hp,
     attack: properties.stats.attack,

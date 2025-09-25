@@ -173,8 +173,9 @@ const BattleResult: React.FC = () => {
         return (
           <div className="bg-gray-700 p-6 rounded-lg shadow-lg w-full max-w-md text-left">
             <h2 className="text-3xl font-bold mb-4 text-center">ステータスアップ！</h2>
+            {/* FIX: Add type guard to ensure `value` is a number before comparison. */}
             {Object.entries(statIncreases).map(([key, value]) => 
-              value > 0 && <StatIncreaseRow key={key} label={key.toUpperCase()} increase={value as number} />
+              typeof value === 'number' && value > 0 && <StatIncreaseRow key={key} label={key.toUpperCase()} increase={value} />
             )}
           </div>
         );

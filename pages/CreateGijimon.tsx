@@ -1,40 +1,67 @@
-
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { createGijimonFromImage } from '../services/geminiService';
+import { generateGijimonProperties, generateGijimonImage, fileToBase64, assembleGijimon } from '../services/geminiService';
 import { useGameState } from '../context/GameStateContext';
-import LoadingOverlay from '../components/LoadingOverlay';
+import ProgressLoader from '../components/ProgressLoader';
+import ErrorDisplay from '../components/ErrorDisplay';
+import FileUploadArea from '../components/FileUploadArea';
 import type { Gijimon } from '../types';
 
 const CreateGijimon: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0); // 0: idle, 1-7: loading
   const [error, setError] = useState<string | null>(null);
-  const [loadingMessage, setLoadingMessage] = useState('');
   const navigate = useNavigate();
   const { addGijimon } = useGameState();
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      setPreview(URL.createObjectURL(file));
-      setError(null);
-    }
-  };
+  const LOADING_STEPS = [
+    '画像をアップロード中...',
+    '画像を分析中...',
+    '擬似モンの特徴を決定中...',
+    'ステータスを生成中...',
+    '技を選択中...',
+    '画像を生成中...',
+    '擬似モンを保存中...'
+  ];
 
-  const handleCreate = async () => {
+  const handleFileSelect = useCallback((file: File) => {
+    setSelectedFile(file);
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+    setPreview(URL.createObjectURL(file));
+  }, [preview]);
+  
+  const handleCancel = useCallback(() => {
+    setLoadingStep(0);
+    // Note: This doesn't abort in-flight API requests
+  }, []);
+
+  const handleCreate = useCallback(async () => {
     if (!selectedFile) {
       setError('画像ファイルを選択してください。');
       return;
     }
-    setIsLoading(true);
     setError(null);
+    setLoadingStep(1); // Start: Uploading
+
     try {
-      setLoadingMessage('画像を分析中...');
-      const gijimonData = await createGijimonFromImage(selectedFile);
+      const baseImage = await fileToBase64(selectedFile);
+      
+      setLoadingStep(2); // Analyzing
+      const properties = await generateGijimonProperties(baseImage, selectedFile.type);
+      
+      // Simulate intermediate steps for better UX
+      await new Promise(res => setTimeout(res, 300)); setLoadingStep(3);
+      await new Promise(res => setTimeout(res, 300)); setLoadingStep(4);
+      await new Promise(res => setTimeout(res, 300)); setLoadingStep(5);
+
+      setLoadingStep(6); // Generating image
+      const gijimonImage = await generateGijimonImage(properties.description, properties.type);
+      
+      const gijimonData = assembleGijimon(properties, baseImage, gijimonImage);
       
       const newGijimon: Gijimon = {
         ...gijimonData,
@@ -45,22 +72,34 @@ const CreateGijimon: React.FC = () => {
         currentHp: gijimonData.stats.hp,
       };
       
-      setLoadingMessage('擬似モンを保存中...');
+      setLoadingStep(7); // Saving
       addGijimon(newGijimon);
+      await new Promise(res => setTimeout(res, 500));
 
       navigate('/pokedex', { state: { newGijimonId: newGijimon.id } });
 
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('擬似モンの生成に失敗しました。時間をおいて再度お試しください。');
-    } finally {
-      setIsLoading(false);
+      setError(err.message || '擬似モンの生成に失敗しました。');
+      setLoadingStep(0);
     }
-  };
+    // No finally block, success navigates away
+  }, [selectedFile, addGijimon, navigate]);
+
+  const isLoading = loadingStep > 0;
 
   return (
     <div className="w-full h-full bg-gray-800 flex flex-col p-6 relative">
-      {isLoading && <LoadingOverlay message={loadingMessage} />}
+      {isLoading && (
+        <ProgressLoader 
+          currentStep={loadingStep} 
+          totalSteps={LOADING_STEPS.length}
+          stepMessages={LOADING_STEPS}
+          onCancel={handleCancel}
+        />
+      )}
+      {error && <ErrorDisplay error={error} onRetry={handleCreate} onClose={() => setError(null)} />}
+      
       <div className="flex-shrink-0 flex items-center mb-4">
         <button onClick={() => navigate('/menu')} className="text-xl font-bold text-white hover:text-yellow-400">
           {'<'} 戻る
@@ -70,22 +109,25 @@ const CreateGijimon: React.FC = () => {
 
       <div className="flex-grow flex flex-col items-center justify-center bg-gray-700 rounded-lg p-4">
         <div className="w-full max-w-md text-center">
-          <div className="w-full aspect-square bg-gray-900 rounded-lg mb-4 flex items-center justify-center border-2 border-dashed border-gray-500">
-            {preview ? (
-              <img src={preview} alt="Preview" className="max-w-full max-h-full object-contain" />
-            ) : (
-              <p className="text-gray-400">画像を選択してください</p>
-            )}
-          </div>
-
-          <label htmlFor="file-upload" className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-            ファイルを選択
-          </label>
-          <input id="file-upload" type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+            <FileUploadArea onFileSelect={handleFileSelect} onError={setError}>
+                {preview ? (
+                    <img src={preview} alt="Preview" className="max-w-full max-h-full object-contain rounded-lg" />
+                ) : (
+                    <>
+                        <div className="text-6xl mb-4" aria-hidden="true">📁</div>
+                        <p className="text-gray-400 text-center">
+                            画像をドラッグ&ドロップ<br />
+                            またはクリックして選択
+                        </p>
+                        <p className="text-xs text-gray-500 mt-2">
+                            JPEG、PNG、WebP、GIF（最大5MB）
+                        </p>
+                    </>
+                )}
+            </FileUploadArea>
           
-          {selectedFile && <p className="text-sm mt-2">{selectedFile.name}</p>}
+          {selectedFile && <p className="text-sm mt-2 text-gray-300">{selectedFile.name}</p>}
 
-          {error && <p className="text-red-500 mt-4">{error}</p>}
         </div>
       </div>
       

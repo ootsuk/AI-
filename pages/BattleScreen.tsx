@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Gijimon } from '../types';
+import type { Gijimon, Move } from '../types';
 import HPBar from '../components/HPBar';
 import ExpBar from '../components/ExpBar';
 import MessageBox from '../components/MessageBox';
 import TypeBadge from '../components/TypeBadge';
 import { useBattleLogic } from '../hooks/useBattleLogic';
+import MoveTooltip from '../components/MoveTooltip';
+import BattlePredictor from '../components/BattlePredictor';
 
 const EnemyStatus: React.FC<{ gijimon: Gijimon }> = ({ gijimon }) => (
   <div className="absolute top-4 left-4 w-2/5 max-w-xs bg-gray-200 rounded-lg p-2 border-4 border-gray-700 shadow-lg rounded-tr-[30px]">
@@ -48,6 +50,7 @@ const BattleScreen: React.FC = () => {
   const { battleState, isProcessing, processTurn } = useBattleLogic();
   const { playerGijimon, enemyGijimon, message, isPlayerTurn, isBattleOver, playerIsHit, enemyIsHit, isPlayerAttacking, isEnemyAttacking } = battleState;
   const [uiState, setUiState] = useState<'main' | 'moves'>('main');
+  const [hoveredMove, setHoveredMove] = useState<Move | null>(null);
 
   useEffect(() => {
     if (isPlayerTurn && !isProcessing) {
@@ -68,7 +71,20 @@ const BattleScreen: React.FC = () => {
 
     return (
       <div className="w-full h-full flex bg-white border-4 border-blue-800 rounded-lg text-black font-bold shadow-inner">
-        <div className="w-1/2 p-3 text-lg flex items-center">{commandMessage}</div>
+        <div className="w-1/2 p-2 text-lg flex flex-col justify-center">
+        {uiState === 'moves' && hoveredMove ? (
+          <div className="space-y-1">
+            <MoveTooltip move={hoveredMove} targetType={enemyGijimon.type} />
+            <BattlePredictor 
+              playerMove={hoveredMove} 
+              playerGijimon={playerGijimon} 
+              enemyGijimon={enemyGijimon} 
+            />
+          </div>
+        ) : (
+          <p className="p-1">{commandMessage}</p>
+        )}
+        </div>
         <div className="w-1/2 border-l-4 border-blue-800 p-2">
           {uiState === 'main' && (
             <div className="grid grid-cols-2 grid-rows-2 gap-2 h-full">
@@ -81,14 +97,20 @@ const BattleScreen: React.FC = () => {
           {uiState === 'moves' && (
             <div className="grid grid-cols-2 gap-2 h-full">
               {playerGijimon.moves.map(move => (
-                <button
+                <div
                   key={move.name}
-                  onClick={() => processTurn(move)}
-                  className="bg-gray-100 border-2 border-gray-400 rounded-md text-black font-bold flex flex-col items-center justify-center hover:bg-yellow-200 text-sm p-1"
+                  onMouseEnter={() => setHoveredMove(move)}
+                  onMouseLeave={() => setHoveredMove(null)}
+                  className="w-full h-full"
                 >
-                  <span>{move.name}</span>
-                  <TypeBadge type={move.type} className="text-xs mt-1" />
-                </button>
+                  <button
+                    onClick={() => processTurn(move)}
+                    className="w-full h-full bg-gray-100 border-2 border-gray-400 rounded-md text-black font-bold flex flex-col items-center justify-center hover:bg-yellow-200 text-sm p-1"
+                  >
+                    <span>{move.name}</span>
+                    <TypeBadge type={move.type} className="text-xs mt-1" />
+                  </button>
+                </div>
               ))}
                {playerGijimon.moves.length < 4 && Array(4 - playerGijimon.moves.length).fill(0).map((_, i) => <div key={i} className="bg-gray-800 border-2 border-gray-600 rounded-md"></div>)}
             </div>
